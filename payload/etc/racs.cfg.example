@@ -1,0 +1,43 @@
+-- RACS v0.4 configuration.
+-- Copy to /etc/racs.cfg. Side names are relative to the Transposer.
+return {
+  nodeName = "RACS-01",
+
+  inventory = {
+    publicSide = "north",
+    stockSide = "south",
+    sidesConfirmed = false,
+    monitorInterval = 2,
+    issuePickupTimeout = 30,
+    returnDepositTimeout = 60
+  },
+
+  equipment = {
+    -- Evidence-backed default for the exact NTM Extended 2.0.2 release.
+    name = "hbm:geiger_counter",
+    damage = nil,
+    requireNoTag = false,
+    confirmed = false
+  },
+
+  -- This is a console access control, stored as plain text because a normal
+  -- OpenComputers computer has no guaranteed cryptographic component.
+  -- Physical security remains required. Change this before admin use.
+  adminPin = "CHANGE_ME",
+
+  data = {
+    statePath = "/var/lib/racs/state.db",
+    logPath = "/var/log/racs/events.log",
+    recentEventLimit = 30
+  },
+
+  network = {
+    enabled = false,
+    port = 42100,
+    strength = 16,
+    allowDiscovery = true,
+    readToken = "CHANGE_ME_READ_TOKEN",
+    maxRequestBytes = 4096
+  }
+}
+

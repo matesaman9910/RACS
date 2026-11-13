@@ -1,0 +1,8 @@
+return {
+  port = 42100,
+  serverAddress = "",
+  readToken = "CHANGE_ME_READ_TOKEN",
+  refreshSeconds = 5,
+  strength = 16
+}
+
