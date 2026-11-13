@@ -88,7 +88,9 @@ if #manifest.files < 1 or #manifest.files > 32 then
   return 1
 end
 
-local staging = "/tmp/racs-install-" .. tostring(math.floor(computer.uptime() * 1000))
+-- OpenOS /tmp is a small memory-backed filesystem and cannot reliably hold the
+-- complete RACS payload. Stage on the persistent system drive instead.
+local staging = "/home/.racs-install-" .. tostring(math.floor(computer.uptime() * 1000))
 local okDirectory, directoryReason = filesystem.makeDirectory(staging)
 if not okDirectory then
   io.stderr:write("Cannot create staging directory: " .. tostring(directoryReason) .. "\n")
