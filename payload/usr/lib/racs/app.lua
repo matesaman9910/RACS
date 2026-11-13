@@ -11,7 +11,7 @@ local Protocol = require("racs.protocol")
 local App = {}
 App.__index = App
 
-local VERSION = "0.4.0"
+local VERSION = "0.4.1"
 
 local function newState()
   return {
@@ -46,6 +46,20 @@ local function itemDescription(stack)
   return string.format("%s x%d slot=%d damage=%d tag=%s label=%s",
     tostring(stack.name), tonumber(stack.size) or 0, tonumber(stack.slot) or 0,
     tonumber(stack.damage) or 0, tostring(stack.hasTag == true), tostring(stack.label))
+end
+
+-- This is deliberately a small, dependency-free verifier rather than a claim of
+-- cryptographic password storage. A normal OpenComputers computer has no
+-- guaranteed data card, and anyone with disk access can replace the program or
+-- brute-force a short PIN. The per-user salt prevents identical PINs from being
+-- stored as identical values and keeps the PIN itself out of state and logs.
+local function personnelPinHash(userKey, pin)
+  local material = "RACS-personnel-pin-v1|" .. tostring(userKey) .. "|" .. tostring(pin)
+  local value = 104729
+  for i = 1, #material do
+    value = (value * 131 + string.byte(material, i)) % 2147483647
+  end
+  return string.format("%08x", value)
 end
 
 function App.new(config)
@@ -308,6 +322,47 @@ function App:registeredPerson(username)
   return self.state.personnel[util.normalizeUser(username)]
 end
 
+function App:promptNewPersonnelPin(userKey)
+  local pin = util.trim(self:readLine("New personnel PIN (4-12 digits): ", true))
+  if not pin:match("^%d+$") or #pin < 4 or #pin > 12 then
+    return nil, "PIN must contain 4-12 digits"
+  end
+  local confirmation = util.trim(self:readLine("Confirm personnel PIN: ", true))
+  if pin ~= confirmation then return nil, "PIN entries did not match" end
+  return personnelPinHash(userKey, pin)
+end
+
+function App:authenticatePerson(person, userKey)
+  if type(person.pinHash) ~= "string" or person.pinHash == "" then
+    self:record("PERSON_PIN_REQUIRED", person.username, "administrator must assign PIN")
+    print("No personnel PIN is assigned. Ask an administrator to set one.")
+    return false
+  end
+  local pin = util.trim(self:readLine("Personnel PIN: ", true))
+  if personnelPinHash(userKey, pin) ~= person.pinHash then
+    self:record("PERSON_AUTH_FAILED", person.username, "console")
+    print("Incorrect personnel PIN.")
+    return false
+  end
+  return true
+end
+
+function App:resetPersonnelPin()
+  self:header("Set/reset personnel PIN")
+  local username = util.trim(self:readLine("Registered username: "))
+  local key = util.normalizeUser(username)
+  local person = self.state.personnel[key]
+  if not person then print("No record found."); return self:pause() end
+  local pinHash, reason = self:promptNewPersonnelPin(key)
+  if not pinHash then print("PIN not changed: " .. tostring(reason)); return self:pause() end
+  person.pinHash = pinHash
+  person.pinVersion = 1
+  person.pinUpdatedAt = util.worldTime()
+  local ok, recordReason = self:record("PERSON_PIN_CHANGED", "administrator", "username=" .. person.username)
+  print(ok and ("PIN updated for " .. person.username .. ".") or tostring(recordReason))
+  self:pause()
+end
+
 function App:registerPerson()
   self:header("Register personnel")
   local username = self:readLine("Minecraft username: ")
@@ -318,16 +373,27 @@ function App:registerPerson()
     print("Already registered as " .. self.state.personnel[key].username)
     return self:pause()
   end
+  local pinHash, pinReason = self:promptNewPersonnelPin(key)
+  if not pinHash then print("Registration cancelled: " .. tostring(pinReason)); return self:pause() end
   self.state.personnel[key] = {
     username = username,
     registeredAt = util.worldTime(),
     inside = false,
     activeLoanId = nil,
-    readings = {}
+    readings = {},
+    pinHash = pinHash,
+    pinVersion = 1,
+    pinUpdatedAt = util.worldTime()
   }
   local ok, reason = self:record("PERSON_REGISTERED", username, "username=" .. username)
   print(ok and ("Registered " .. username .. ".") or tostring(reason))
   self:pause()
+end
+
+function App:adminRegisterPerson()
+  self:header("Personnel registration authorization")
+  if not self:authenticateAdmin() then return self:pause() end
+  self:registerPerson()
 end
 
 function App:transactionGate(allowLockdown)
@@ -388,6 +454,7 @@ function App:checkIn()
   local person = self.state.personnel[key]
   if not person then print("Not registered."); return self:pause() end
   if person.inside or person.activeLoanId then print("Person already has an active check-in/loan."); return self:pause() end
+  if not self:authenticatePerson(person, key) then return self:pause() end
 
   local stockItem, stockStateOrReason = self.inventory:firstStockEquipment()
   if not stockItem then print("No equipment available: " .. tostring(stockStateOrReason)); return self:pause() end
@@ -517,6 +584,7 @@ function App:checkOut()
     print("No active check-in/loan for that person.")
     return self:pause()
   end
+  if not self:authenticatePerson(person, key) then return self:pause() end
   local reading = util.trim(self:readLine("Self-reported radiation reading (free text): "))
   if reading == "" then print("A reading entry is required; use 'not available' if necessary."); return self:pause() end
 
@@ -781,19 +849,23 @@ function App:adminMenu()
   while true do
     self:header("Administration")
     print("1  Toggle lockdown (currently " .. tostring(self.state.lockdown) .. ")")
-    print("2  Search personnel")
-    print("3  Show recent events")
-    print("4  Resume/recheck pending transaction")
-    print("5  Force-clear pending marker")
+    print("2  Register personnel")
+    print("3  Set/reset personnel PIN")
+    print("4  Search personnel")
+    print("5  Show recent events")
+    print("6  Resume/recheck pending transaction")
+    print("7  Force-clear pending marker")
     print("B  Back")
     local choice = string.upper(util.trim(self:readLine("> ")))
     if choice == "1" then
       self.state.lockdown = not self.state.lockdown
       self:record("LOCKDOWN_CHANGED", "administrator", "enabled=" .. tostring(self.state.lockdown))
-    elseif choice == "2" then self:searchPersonnel()
-    elseif choice == "3" then self:showRecentEvents()
-    elseif choice == "4" then self:header("Pending recovery"); self:resumePending(); self:pause()
-    elseif choice == "5" then self:header("Force-clear pending"); self:forceClearPending(); self:pause()
+    elseif choice == "2" then self:registerPerson()
+    elseif choice == "3" then self:resetPersonnelPin()
+    elseif choice == "4" then self:searchPersonnel()
+    elseif choice == "5" then self:showRecentEvents()
+    elseif choice == "6" then self:header("Pending recovery"); self:resumePending(); self:pause()
+    elseif choice == "7" then self:header("Force-clear pending"); self:forceClearPending(); self:pause()
     elseif choice == "B" then return end
   end
 end
@@ -858,7 +930,7 @@ function App:mainMenu()
       status.stockEquipment, status.alerts))
     if self.state.pending then print("PENDING: " .. tostring(self.state.pending.kind)) end
     print("")
-    print("1  Register personnel")
+    print("1  Register personnel (admin PIN)")
     print("2  Check in / issue Geiger")
     print("3  Check out / return + self-reported reading")
     print("4  Equipment-only return")
@@ -868,7 +940,7 @@ function App:mainMenu()
     print("8  Diagnostics / commissioning")
     print("Q  Quit")
     local choice = string.upper(util.trim(self:readLine("> ")))
-    if choice == "1" then self:registerPerson()
+    if choice == "1" then self:adminRegisterPerson()
     elseif choice == "2" then self:checkIn()
     elseif choice == "3" then self:checkOut()
     elseif choice == "4" then self:equipmentOnlyReturn()

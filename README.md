@@ -1,4 +1,4 @@
-# RACS v0.4.0
+# RACS v0.4.1
 
 RACS is a standalone Radiological Access Control System for OpenComputers on
 Minecraft 1.12.2. It does **not** control doors and does not integrate with the
@@ -10,6 +10,7 @@ The program combines the v0.1-v0.4 roadmap in one installable release:
 - v0.2: persistent personnel, loans, accountability, and self-reported readings.
 - v0.3: administrative lockdown, alerts, recovery, and an append-only event log.
 - v0.4: a versioned, read-only wireless dashboard protocol and client.
+- v0.4.1: admin-protected personnel registration and individual personnel PINs.
 
 ## Important safety boundary
 
@@ -76,18 +77,79 @@ Transposer block, so verify them in game instead of relying on a diagram.
 
 The installer preserves an existing `/etc/racs.cfg` and existing data.
 
+## Optional Pastebin + private Gitea installation
+
+`gitea-bootstrap.lua` is designed to be the small, stable file placed on
+Pastebin. The application files and `racs-manifest.cfg` stay in an anonymously
+readable distribution repository. The bootstrap prompts for the Gitea URL,
+owner, repository, immutable release tag, and repository folder. It downloads
+everything into `/tmp` before replacing installed program files, and preserves
+existing configuration.
+
+The bootstrap deliberately accepts no passwords or tokens. OpenOS may include
+a failed request URL in terminal errors, proxies commonly log URLs, and a running
+OpenComputers process can be persisted with the Minecraft world. If the main
+Gitea installation requires sign-in even for public repositories, publish only
+the RACS release payload through a separate anonymous static HTTPS path or a
+separate public distribution repository. Keep private development repositories
+behind the normal login.
+
+Upload `gitea-bootstrap.lua` to Pastebin, then run it with the ID Pastebin gives
+you:
+
+    pastebin run PASTE_ID
+
+If `pastebin` is unavailable, download and run that same stable bootstrap:
+
+    wget -f https://pastebin.com/raw/PASTE_ID /tmp/racs-bootstrap.lua
+    /tmp/racs-bootstrap.lua
+
+If the Gitea host is behind a VPN, firewall, IP allowlist, or a separate
+browser-login proxy, the Minecraft server host must be allowed to reach the
+narrow anonymous HTTPS release route. Internet Card HTTP requests originate
+from the Minecraft server process (or the local Java process in single-player),
+not from a separate in-game IP. Do not put a token in Pastebin, a URL, a command
+line, or an OpenOS configuration file.
+
+## Recommended Pastebin + public GitHub installation
+
+`github-bootstrap.lua` is the recommended network installer. It contains the
+public repository name `matesaman9910/RACS`, downloads `racs-manifest.cfg` from
+the `main` branch, then obtains application files from the immutable release tag
+named by that manifest. It accepts and stores no credentials.
+
+Upload `github-bootstrap.lua` to Pastebin once, then install with:
+
+    pastebin run PASTE_ID
+
+The GitHub repository must contain the contents of this release directory at
+its root. Create the manifest's `racs-v0.4.1` tag only after all files have been
+uploaded and verified. Future releases update the manifest on `main` to point to
+a new immutable tag; the Pastebin bootstrap does not change.
+
 ## Normal operation
 
 ### Register
 
-Register a Minecraft username before the first check-in. Usernames are matched
-case-insensitively while the originally entered spelling is retained.
+Registration requires the administrator PIN. The administrator registers a
+Minecraft username and assigns a 4-12 digit personnel PIN. Usernames are matched
+case-insensitively while the originally entered spelling is retained. Existing
+personnel records created before v0.4.1 are preserved, but an administrator must
+use **Administration > Set/reset personnel PIN** before those people can check
+in or out.
+
+Personnel PINs are entered with masked characters and are not written to the
+event log or stored directly. RACS stores a small dependency-free verifier. This
+is suitable for preventing casual console use, but it is not cryptographic
+security: a short numeric PIN can be brute-forced by anyone who can copy the
+computer disk. Keep the computer and disk physically secured.
 
 ### Check in / issue equipment
 
 RACS refuses the operation unless the public chest is empty, the person is
 outside with no active loan, stock contains a configured Geiger, there is no
 unresolved transaction, commissioning is complete, and lockdown is off.
+The registered person must enter their personnel PIN before equipment moves.
 
 After one item is moved into the public chest, the person and quantity-based
 loan are recorded immediately. RACS then waits for the item to be collected.
@@ -99,7 +161,8 @@ so RACS does not pretend to track individual instruments.
 The operator enters the username and a free-form, self-reported radiation
 reading. RACS waits for exactly one configured Geiger and no other item in the
 public chest, transfers it to secure stock, closes the loan, stores the reading,
-and marks the person outside. Check-out remains available during lockdown.
+and marks the person outside. The registered person must authenticate with their
+personnel PIN first. Check-out remains available during lockdown.
 
 ### Equipment-only return
 
@@ -108,8 +171,9 @@ This is also available during lockdown. It is logged as an unassigned return.
 
 ### Lockdown
 
-Administrative lockdown blocks new check-ins only. Registration, accountability
-views, check-outs, and both assigned and equipment-only returns remain available.
+Administrative lockdown blocks new check-ins only. Admin-authorized registration,
+accountability views, PIN-authenticated check-outs, and both assigned and
+equipment-only returns remain available.
 
 ## Persistence, alerts, and recovery
 
@@ -175,10 +239,13 @@ Do not skip stages. Use expendable test data and back up the disk first.
 ### Stage 3: clean issue
 
 1. Put at least two confirmed Geigers in secure stock.
-2. Register a test player and check them in.
+2. Register a test player with the admin PIN, assign a test personnel PIN, and
+   check them in using that personnel PIN.
 3. Verify one item moves to public, the player collects it, accountability shows
    the player inside, and one active loan exists.
 4. Restart RACS and confirm the record persists.
+5. Try an incorrect personnel PIN and verify no item moves and the failed attempt
+   appears in the event log.
 
 ### Stage 4: clean return
 
