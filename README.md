@@ -1,4 +1,4 @@
-# RACS v0.4.1
+# RACS v0.4.2
 
 RACS is a standalone Radiological Access Control System for OpenComputers on
 Minecraft 1.12.2. It does **not** control doors and does not integrate with the
@@ -11,6 +11,7 @@ The program combines the v0.1-v0.4 roadmap in one installable release:
 - v0.3: administrative lockdown, alerts, recovery, and an append-only event log.
 - v0.4: a versioned, read-only wireless dashboard protocol and client.
 - v0.4.1: admin-protected personnel registration and individual personnel PINs.
+- v0.4.2: safe personnel deactivation/reactivation and cache-safe updates.
 
 ## Important safety boundary
 
@@ -114,16 +115,18 @@ line, or an OpenOS configuration file.
 ## Recommended Pastebin + public GitHub installation
 
 `github-bootstrap.lua` is the recommended network installer. It contains the
-public repository name `matesaman9910/RACS`, downloads `racs-manifest.cfg` from
-the `main` branch, then obtains application files from the immutable release tag
-named by that manifest. It accepts and stores no credentials.
+public repository name `matesaman9910/RACS`, resolves the `main` branch to its
+exact commit through the GitHub API, downloads `racs-manifest.cfg` from that
+immutable commit, then obtains application files from the immutable release tag
+named by the manifest. Resolving the commit prevents stale raw-file caching from
+silently selecting an older release. It accepts and stores no credentials.
 
 Upload `github-bootstrap.lua` to Pastebin once, then install with:
 
     pastebin run PASTE_ID
 
 The GitHub repository must contain the contents of this release directory at
-its root. Create the manifest's `racs-v0.4.1` tag only after all files have been
+its root. Create the manifest's `racs-v0.4.2` tag only after all files have been
 uploaded and verified. Future releases update the manifest on `main` to point to
 a new immutable tag; the Pastebin bootstrap does not change.
 
@@ -143,6 +146,16 @@ event log or stored directly. RACS stores a small dependency-free verifier. This
 is suitable for preventing casual console use, but it is not cryptographic
 security: a short numeric PIN can be brute-forced by anyone who can copy the
 computer disk. Keep the computer and disk physically secured.
+
+### Deactivate or reactivate personnel
+
+Administration option **Deactivate/reactivate personnel** disables future
+check-ins without deleting the person's loans, readings, PIN verifier, or audit
+history. Deactivation is refused while the person is recorded inside, has an
+active loan, has a pending transaction, or is referenced by an active loan
+record. The administrator must type `DEACTIVATE` or `REACTIVATE` to confirm the
+change. A reactivated person keeps their previous PIN unless an administrator
+resets it separately.
 
 ### Check in / issue equipment
 
@@ -246,6 +259,8 @@ Do not skip stages. Use expendable test data and back up the disk first.
 4. Restart RACS and confirm the record persists.
 5. Try an incorrect personnel PIN and verify no item moves and the failed attempt
    appears in the event log.
+6. Deactivate the test player, verify check-in is blocked, reactivate them, and
+   verify their existing PIN works again.
 
 ### Stage 4: clean return
 

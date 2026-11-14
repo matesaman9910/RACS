@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2
+
+- Added admin-only personnel deactivation and reactivation.
+- Refused deactivation for personnel who are inside, have an active loan, have a
+  pending transaction, or are referenced by an active loan record.
+- Preserved personnel PINs, readings, loan records, and audit history while
+  deactivated.
+- Blocked new check-ins for deactivated personnel.
+- Changed the GitHub updater to resolve `main` to an immutable commit before
+  downloading the release manifest, avoiding stale cached manifests.
+
 ## 0.4.1
 
 - Protected personnel registration with the administrator PIN.

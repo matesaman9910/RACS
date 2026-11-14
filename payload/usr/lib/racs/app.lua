@@ -11,7 +11,7 @@ local Protocol = require("racs.protocol")
 local App = {}
 App.__index = App
 
-local VERSION = "0.4.1"
+local VERSION = "0.4.2"
 
 local function newState()
   return {
@@ -35,6 +35,9 @@ local function repairState(state)
   state.nextLoanId = tonumber(state.nextLoanId) or 1
   state.lockdown = state.lockdown == true
   state.personnel = type(state.personnel) == "table" and state.personnel or {}
+  for _, person in pairs(state.personnel) do
+    if type(person) == "table" then person.active = person.active ~= false end
+  end
   state.loans = type(state.loans) == "table" and state.loans or {}
   state.activeAlerts = type(state.activeAlerts) == "table" and state.activeAlerts or {}
   state.recentEvents = type(state.recentEvents) == "table" and state.recentEvents or {}
@@ -363,6 +366,50 @@ function App:resetPersonnelPin()
   self:pause()
 end
 
+function App:changePersonnelStatus()
+  self:header("Deactivate/reactivate personnel")
+  local username = util.trim(self:readLine("Registered username: "))
+  local key = util.normalizeUser(username)
+  local person = self.state.personnel[key]
+  if not person then print("No record found."); return self:pause() end
+
+  local active = person.active ~= false
+  print("Personnel: " .. person.username)
+  print("Current status: " .. (active and "ACTIVE" or "DEACTIVATED"))
+
+  if active then
+    if person.inside or person.activeLoanId then
+      print("Cannot deactivate: person is inside or has an active loan.")
+      return self:pause()
+    end
+    if self.state.pending and self.state.pending.userKey == key then
+      print("Cannot deactivate: a transaction is pending for this person.")
+      return self:pause()
+    end
+    for _, loan in pairs(self.state.loans) do
+      if loan.status == "active" and util.normalizeUser(loan.username) == key then
+        print("Cannot deactivate: an active loan record still exists.")
+        return self:pause()
+      end
+    end
+    local confirmation = string.upper(util.trim(self:readLine("Type DEACTIVATE to confirm: ")))
+    if confirmation ~= "DEACTIVATE" then print("Cancelled."); return self:pause() end
+    person.active = false
+    person.deactivatedAt = util.worldTime()
+    person.reactivatedAt = nil
+    local ok, reason = self:record("PERSON_DEACTIVATED", "administrator", "username=" .. person.username)
+    print(ok and (person.username .. " is now deactivated.") or tostring(reason))
+  else
+    local confirmation = string.upper(util.trim(self:readLine("Type REACTIVATE to confirm: ")))
+    if confirmation ~= "REACTIVATE" then print("Cancelled."); return self:pause() end
+    person.active = true
+    person.reactivatedAt = util.worldTime()
+    local ok, reason = self:record("PERSON_REACTIVATED", "administrator", "username=" .. person.username)
+    print(ok and (person.username .. " is active again.") or tostring(reason))
+  end
+  self:pause()
+end
+
 function App:registerPerson()
   self:header("Register personnel")
   local username = self:readLine("Minecraft username: ")
@@ -371,6 +418,9 @@ function App:registerPerson()
   local key = util.normalizeUser(username)
   if self.state.personnel[key] then
     print("Already registered as " .. self.state.personnel[key].username)
+    if self.state.personnel[key].active == false then
+      print("This record is deactivated; reactivate it from Administration.")
+    end
     return self:pause()
   end
   local pinHash, pinReason = self:promptNewPersonnelPin(key)
@@ -380,6 +430,7 @@ function App:registerPerson()
     registeredAt = util.worldTime(),
     inside = false,
     activeLoanId = nil,
+    active = true,
     readings = {},
     pinHash = pinHash,
     pinVersion = 1,
@@ -453,6 +504,7 @@ function App:checkIn()
   local key = util.normalizeUser(username)
   local person = self.state.personnel[key]
   if not person then print("Not registered."); return self:pause() end
+  if person.active == false then print("Personnel record is deactivated."); return self:pause() end
   if person.inside or person.activeLoanId then print("Person already has an active check-in/loan."); return self:pause() end
   if not self:authenticatePerson(person, key) then return self:pause() end
 
@@ -784,6 +836,7 @@ function App:searchPersonnel()
   local person = self.state.personnel[query]
   if not person then print("No record found."); return self:pause() end
   print("Username:       " .. person.username)
+  print("Status:         " .. ((person.active ~= false) and "ACTIVE" or "DEACTIVATED"))
   print("Inside:         " .. tostring(person.inside))
   print("Active loan:    " .. tostring(person.activeLoanId or "none"))
   print("Registered:     " .. util.worldTimeLabel(person.registeredAt))
@@ -851,10 +904,11 @@ function App:adminMenu()
     print("1  Toggle lockdown (currently " .. tostring(self.state.lockdown) .. ")")
     print("2  Register personnel")
     print("3  Set/reset personnel PIN")
-    print("4  Search personnel")
-    print("5  Show recent events")
-    print("6  Resume/recheck pending transaction")
-    print("7  Force-clear pending marker")
+    print("4  Deactivate/reactivate personnel")
+    print("5  Search personnel")
+    print("6  Show recent events")
+    print("7  Resume/recheck pending transaction")
+    print("8  Force-clear pending marker")
     print("B  Back")
     local choice = string.upper(util.trim(self:readLine("> ")))
     if choice == "1" then
@@ -862,10 +916,11 @@ function App:adminMenu()
       self:record("LOCKDOWN_CHANGED", "administrator", "enabled=" .. tostring(self.state.lockdown))
     elseif choice == "2" then self:registerPerson()
     elseif choice == "3" then self:resetPersonnelPin()
-    elseif choice == "4" then self:searchPersonnel()
-    elseif choice == "5" then self:showRecentEvents()
-    elseif choice == "6" then self:header("Pending recovery"); self:resumePending(); self:pause()
-    elseif choice == "7" then self:header("Force-clear pending"); self:forceClearPending(); self:pause()
+    elseif choice == "4" then self:changePersonnelStatus()
+    elseif choice == "5" then self:searchPersonnel()
+    elseif choice == "6" then self:showRecentEvents()
+    elseif choice == "7" then self:header("Pending recovery"); self:resumePending(); self:pause()
+    elseif choice == "8" then self:header("Force-clear pending"); self:forceClearPending(); self:pause()
     elseif choice == "B" then return end
   end
 end

@@ -48,8 +48,8 @@ local baseUrl = ask("Gitea base URL", "https://gitea.example.com")
 baseUrl = baseUrl:gsub("/+$", "")
 local owner = ask("Repository owner or organization")
 local repository = ask("Repository name")
-local reference = ask("Branch, tag, or commit", "racs-v0.4.1")
-local basePath = ask("RACS folder inside repository", "RACS-v0.4.1")
+local reference = ask("Branch, tag, or commit", "racs-v0.4.2")
+local basePath = ask("RACS folder inside repository", "RACS-v0.4.2")
 basePath = basePath:gsub("^/+", ""):gsub("/+$", "")
 
 if not baseUrl:match("^https://") then

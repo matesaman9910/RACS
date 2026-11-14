@@ -28,8 +28,13 @@ local function rawUrl(reference, path)
     .. "/" .. encodePath(reference) .. "/" .. encodePath(path)
 end
 
-local function download(url, maximumBytes)
-  local okRequest, iterator = pcall(internet.request, url)
+local function download(url, maximumBytes, headers)
+  local okRequest, iterator
+  if headers then
+    okRequest, iterator = pcall(internet.request, url, nil, headers)
+  else
+    okRequest, iterator = pcall(internet.request, url)
+  end
   if not okRequest then return nil, "request could not start" end
   local chunks, size = {}, 0
   local okRead = pcall(function()
@@ -63,9 +68,30 @@ local allowedTargets = {
 
 print("RACS GitHub installer")
 print("Repository: " .. OWNER .. "/" .. REPOSITORY)
+print("Resolving update channel...")
+
+-- Resolve main to an immutable commit first. Fetching raw files directly from a
+-- moving branch can return an older CDN-cached manifest immediately after a
+-- release, which previously caused an apparent successful downgrade.
+local channelApiUrl = "https://api.github.com/repos/" .. OWNER .. "/" .. REPOSITORY
+  .. "/commits/" .. encodePath(CHANNEL_REF)
+local channelText, channelReason = download(channelApiUrl, 131072, {
+  ["Accept"] = "application/vnd.github+json",
+  ["User-Agent"] = "RACS-OpenComputers-Installer"
+})
+if not channelText then
+  io.stderr:write("Cannot resolve update channel: " .. tostring(channelReason) .. "\n")
+  return 1
+end
+local channelCommit = channelText:match('"sha"%s*:%s*"([0-9a-fA-F]+)"')
+if not channelCommit or #channelCommit ~= 40 then
+  io.stderr:write("GitHub returned an invalid update-channel response.\n")
+  return 1
+end
+print("Channel commit: " .. channelCommit:sub(1, 12))
 print("Downloading release manifest...")
 
-local manifestText, manifestReason = download(rawUrl(CHANNEL_REF, MANIFEST_PATH), 32768)
+local manifestText, manifestReason = download(rawUrl(channelCommit, MANIFEST_PATH), 32768)
 if not manifestText then
   io.stderr:write("Manifest download failed: " .. tostring(manifestReason) .. "\n")
   return 1
